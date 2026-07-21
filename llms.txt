@@ -1,0 +1,43 @@
+# Newtons NEET SS
+
+Newtons NEET SS is an AI-powered, high-yield preparation and analytics platform designed specifically for medical professionals preparing for the NEET SS (Super Specialty) entrance exams. 
+
+Developed by Newtons AI, this application combines active recall methodology, clinical clinical cases, image-based diagnostic questions (including histopathology, MRI brain scans, and chest radiographs), and personalized AI performance recommendations to streamline residency and super-specialty exam preparation.
+
+## Core Features
+
+- **Personalized AI Dashboard**: Tracks user performance across multiple core clinical and diagnostic disciplines, providing immediate metrics on accuracy, streaks, and overall preparation level.
+- **Custom Grand Test (GT) Builder**: Allows users to customize testing sessions by selecting specific subjects, question limits, and modes (Timed vs. Untimed, Exam vs. Practice).
+- **Interactive Question Engine**: High-yield questions paired with comprehensive diagnostic rationale, clinical highpoints, and active recall validations.
+- **Visual Diagnostics QBank**: Specialized questions focused on chest radiographs (lobar consolidation/pneumonia), sagittal brain MRIs (neuroanatomy), and biopsy histology slides (Reed-Sternberg cells/Hodgkin Lymphoma).
+- **AI Recommendation Engine**: Employs Gemini 3.5 Flash to evaluate active study histories and dynamically formulate highly personalized study strategies and topics to prioritize.
+
+## Clinical Subjects Covered
+
+- **Anatomy**: Focus on clinical neuroanatomy and neuroimaging structures.
+- **Physiology**: Focus on CVS, vestibular, excretory systems, and general cellular mechanisms.
+- **Biochemistry**: Carbohydrate, lipid, protein chemistry, and metabolic enzyme pathways.
+- **Pathology**: Neoplasia, cellular injury, inflammation, and hematology biopsy slides.
+- **Pharmacology**: Central Nervous System (CNS) therapeutics, cardiovascular drugs, and kinetics.
+- **Microbiology**: General microbiology, immunology, and host-pathogen interactions.
+- **Forensic Medicine & Toxicology**: Medical toxicology, thanatology, violent asphyxia, and injury diagnostics.
+- **Social & Preventive Medicine (PSM)**: National health programs, biostatistics, epidemiology, screening of disease, and international health.
+- **Medicine**: Cardiology, gastroenterology, endocrinology, neurology, nephrology, and pulmonology.
+- **Surgery**: Urology, hepatobiliary, pancreatic systems, and gastrointestinal surgery.
+- **OBGYN**: Obstetrics and gynecological pathology, and reproductive endocrinology.
+- **Pediatrics**: Neonatology, pediatric emergencies, developmental milestones.
+- **Psychiatry**: Behavioral health, clinical psychopharmacology, diagnostic criteria.
+- **Dermatology**: Papulo-squamous disorders, sexually transmitted infections, and visual skin lesions.
+- **Ophthalmology**: Diagnostic visual optics, retinal disorders, glaucoma.
+- **ENT**: Ear, nose, throat clinical anatomy and common surgical pathologies.
+- **Orthopedics**: Fracture diagnostics, skeletal radiology, and sports medicine.
+- **Anesthesiology**: Pain management, pre-anesthetic protocols, active monitoring, and emergency medicine.
+- **Radiology**: Genitourinary imaging, thoracic radiography, and scanning techniques.
+
+## Developer & Integration Suite
+- **Web App**: https://dr.newtons.in (Canonical)
+- **App Store/Play Store TWA package**: `in.newtons.neetss.twa`
+- **More suite modules**:
+  - **Newtons AI Clinical App**: https://app.newtons.in - AI for diagnostic workflows, history taking, differential diagnostic mapping.
+  - **Newtons Clinic Management System (CMS)**: https://cms.newtons.in - Integrated tool for independent clinicians.
+  - **Newtons Hospital Management System (HMS)**: https://hms.newtons.in - Comprehensive hospital enterprise platform.
