@@ -28,6 +28,7 @@ var import_vite = require("vite");
 var import_genai = require("@google/genai");
 var import_dotenv = __toESM(require("dotenv"), 1);
 var import_fs = __toESM(require("fs"), 1);
+var import_cloudinary = require("cloudinary");
 import_dotenv.default.config();
 function parseCSV(text) {
   const result = [];
@@ -282,105 +283,78 @@ function loadDataset() {
   const qList = [];
   const subjectCounts = {};
   const subjectTopics = {};
-  const csvPath = import_path.default.join(process.cwd(), "public", "questions_without_images.csv");
-  if (import_fs.default.existsSync(csvPath)) {
-    try {
-      const content = import_fs.default.readFileSync(csvPath, "utf8");
-      const rows = parseCSV(content);
-      for (let i = 1; i < rows.length; i++) {
-        const row = rows[i];
-        if (row.length < 10) continue;
-        const csvSubject = row[0];
-        const topic = row[1] || "General";
-        const subtopic = row[2] || "General";
-        const questionText = row[3];
-        const explanation = row[4];
-        const optionA = row[5];
-        const optionB = row[6];
-        const optionC = row[7];
-        const optionD = row[8];
-        const correctOpt = row[9];
-        const mapped = SUBJECT_MAPPING[csvSubject] || { id: "med", name: "Medicine", icon: "Stethoscope", color: "bg-cyan-100 text-cyan-600" };
-        const subjectId = mapped.id;
-        const options = [optionA, optionB, optionC, optionD].map((o) => o ? o.trim() : "").filter(Boolean);
-        if (options.length === 0 || !questionText) continue;
-        const correctAnswer = getCorrectAnswerIndex(correctOpt);
-        qList.push({
-          id: `csv_q_${i}`,
-          subjectId,
-          topic,
-          subtopic,
-          text: questionText,
-          options,
-          correctAnswer,
-          explanation: explanation || "Explanation is active recall verified.",
-          isImageBased: false
-        });
-        subjectCounts[subjectId] = (subjectCounts[subjectId] || 0) + 1;
-        if (!subjectTopics[subjectId]) {
-          subjectTopics[subjectId] = /* @__PURE__ */ new Set();
+  try {
+    const publicDir = import_path.default.join(process.cwd(), "public");
+    if (import_fs.default.existsSync(publicDir)) {
+      const files = import_fs.default.readdirSync(publicDir).filter((f) => f.endsWith(".csv"));
+      console.log("Found CSV files in public to parse:", files);
+      for (const file of files) {
+        const csvPath = import_path.default.join(publicDir, file);
+        try {
+          const content = import_fs.default.readFileSync(csvPath, "utf8");
+          const rows = parseCSV(content);
+          if (rows.length < 2) continue;
+          const headers = rows[0].map((h) => h.trim().toLowerCase());
+          const questionColIdx = headers.findIndex((h) => h === "questiontext" || h === "question" || h === "text");
+          const explanationColIdx = headers.findIndex((h) => h === "explanation");
+          const optAIdx = headers.findIndex((h) => h === "optiona" || h === "option a");
+          const optBIdx = headers.findIndex((h) => h === "optionb" || h === "option b");
+          const optCIdx = headers.findIndex((h) => h === "optionc" || h === "option c");
+          const optDIdx = headers.findIndex((h) => h === "optiond" || h === "option d");
+          const correctOptIdx = headers.findIndex((h) => h === "correctopt" || h === "correct option");
+          const imageUrlIdx = headers.findIndex((h) => h === "imageurl" || h === "image");
+          const isImageFile = file.includes("with_images") || imageUrlIdx !== -1;
+          for (let i = 1; i < rows.length; i++) {
+            const row = rows[i];
+            if (row.length < 4) continue;
+            const questionText = questionColIdx !== -1 ? row[questionColIdx] : "";
+            if (!questionText) continue;
+            const csvSubject = row[0] || "Medicine";
+            const topic = row[1] || "General";
+            const subtopic = row[2] || "General";
+            const explanation = explanationColIdx !== -1 ? row[explanationColIdx] : "Explanation is active recall verified.";
+            const optionA = optAIdx !== -1 ? row[optAIdx] : "";
+            const optionB = optBIdx !== -1 ? row[optBIdx] : "";
+            const optionC = optCIdx !== -1 ? row[optCIdx] : "";
+            const optionD = optDIdx !== -1 ? row[optDIdx] : "";
+            const options = [optionA, optionB, optionC, optionD].map((o) => o ? o.trim() : "").filter(Boolean);
+            if (options.length === 0) continue;
+            const correctOpt = correctOptIdx !== -1 ? row[correctOptIdx] : "A";
+            const correctAnswer = getCorrectAnswerIndex(correctOpt);
+            const mapped = SUBJECT_MAPPING[csvSubject] || { id: "med", name: "Medicine", icon: "Stethoscope", color: "bg-cyan-100 text-cyan-600" };
+            const subjectId = mapped.id;
+            const imageUrl = imageUrlIdx !== -1 && row[imageUrlIdx] ? row[imageUrlIdx] : isImageFile ? getExhibitImageForQuestion(subjectId, topic, questionText) : void 0;
+            qList.push({
+              id: `csv_${file.replace(/[^a-z0-9]/gi, "_")}_q_${i}`,
+              subjectId,
+              topic,
+              subtopic,
+              text: questionText,
+              options,
+              correctAnswer,
+              explanation: explanation || "Explanation is active recall verified.",
+              isImageBased: isImageFile || !!imageUrl,
+              imageUrl,
+              sourceFile: file
+            });
+            subjectCounts[subjectId] = (subjectCounts[subjectId] || 0) + 1;
+            if (!subjectTopics[subjectId]) {
+              subjectTopics[subjectId] = /* @__PURE__ */ new Set();
+            }
+            subjectTopics[subjectId].add(topic);
+          }
+          console.log(`Successfully parsed ${rows.length - 1} rows from dynamic CSV ${file}`);
+        } catch (e) {
+          console.error(`Failed to parse CSV file ${file}:`, e);
         }
-        subjectTopics[subjectId].add(topic);
       }
-      console.log(`Successfully parsed ${qList.filter((q) => !q.isImageBased).length} text questions from CSV.`);
-    } catch (e) {
-      console.error("Failed to parse CSV file:", e);
     }
-  } else {
-    console.warn("questions_without_images.csv not found.");
-  }
-  const imageCsvPath = import_path.default.join(process.cwd(), "public", "questions_with_images.csv");
-  if (import_fs.default.existsSync(imageCsvPath)) {
-    try {
-      const content = import_fs.default.readFileSync(imageCsvPath, "utf8");
-      const rows = parseCSV(content);
-      for (let i = 1; i < rows.length; i++) {
-        const row = rows[i];
-        if (row.length < 10) continue;
-        const csvSubject = row[0];
-        const topic = row[1] || "General";
-        const subtopic = row[2] || "General";
-        const questionText = row[3];
-        const explanation = row[4];
-        const optionA = row[5];
-        const optionB = row[6];
-        const optionC = row[7];
-        const optionD = row[8];
-        const correctOpt = row[9];
-        const mapped = SUBJECT_MAPPING[csvSubject] || { id: "med", name: "Medicine", icon: "Stethoscope", color: "bg-cyan-100 text-cyan-600" };
-        const subjectId = mapped.id;
-        const options = [optionA, optionB, optionC, optionD].map((o) => o ? o.trim() : "").filter(Boolean);
-        if (options.length === 0 || !questionText) continue;
-        const correctAnswer = getCorrectAnswerIndex(correctOpt);
-        const imageUrl = getExhibitImageForQuestion(subjectId, topic, questionText);
-        qList.push({
-          id: `csv_img_q_${i}`,
-          subjectId,
-          topic,
-          subtopic,
-          text: questionText,
-          options,
-          correctAnswer,
-          explanation: explanation || "Explanation is active recall verified.",
-          isImageBased: true,
-          imageUrl
-        });
-        subjectCounts[subjectId] = (subjectCounts[subjectId] || 0) + 1;
-        if (!subjectTopics[subjectId]) {
-          subjectTopics[subjectId] = /* @__PURE__ */ new Set();
-        }
-        subjectTopics[subjectId].add(topic);
-      }
-      console.log(`Successfully parsed ${qList.filter((q) => q.isImageBased).length} image-based questions from CSV.`);
-    } catch (e) {
-      console.error("Failed to parse image-based CSV file:", e);
-    }
-  } else {
-    console.warn("questions_with_images.csv not found.");
+  } catch (err) {
+    console.error("Error reading public directory:", err);
   }
   IMAGE_QUESTIONS.forEach((imgQ) => {
     if (!qList.some((q) => q.id === imgQ.id)) {
-      qList.push(imgQ);
+      qList.push({ ...imgQ, sourceFile: "questions_with_images.csv" });
       subjectCounts[imgQ.subjectId] = (subjectCounts[imgQ.subjectId] || 0) + 1;
       if (!subjectTopics[imgQ.subjectId]) {
         subjectTopics[imgQ.subjectId] = /* @__PURE__ */ new Set();
@@ -405,9 +379,30 @@ loadDataset();
 async function startServer() {
   const app = (0, import_express.default)();
   const PORT = 3e3;
-  app.use(import_express.default.json());
+  const CONFIG_PATH = import_path.default.join(process.cwd(), "config.json");
+  function getSettings() {
+    let settings = {
+      cloudinaryCloudName: process.env.CLOUDINARY_CLOUD_NAME || "nbmtg6zc",
+      cloudinaryApiKey: process.env.CLOUDINARY_API_KEY || "585169572641989",
+      cloudinaryApiSecret: process.env.CLOUDINARY_API_SECRET || "1ciiKnisC1-VGPaORR9OkQDZ7Ik",
+      cloudinaryUploadPreset: process.env.CLOUDINARY_UPLOAD_PRESET || "ml_default",
+      geminiApiKey: process.env.GEMINI_API_KEY || ""
+    };
+    if (import_fs.default.existsSync(CONFIG_PATH)) {
+      try {
+        const fileSettings = JSON.parse(import_fs.default.readFileSync(CONFIG_PATH, "utf-8"));
+        settings = { ...settings, ...fileSettings };
+      } catch (e) {
+        console.error("Failed to read config.json:", e);
+      }
+    }
+    return settings;
+  }
+  const initialSettings = getSettings();
+  app.use(import_express.default.json({ limit: "50mb" }));
+  app.use(import_express.default.urlencoded({ limit: "50mb", extended: true }));
   const ai = new import_genai.GoogleGenAI({
-    apiKey: process.env.GEMINI_API_KEY || "",
+    apiKey: initialSettings.geminiApiKey || process.env.GEMINI_API_KEY || "",
     httpOptions: {
       headers: {
         "User-Agent": "aistudio-build"
@@ -437,6 +432,412 @@ async function startServer() {
       }
     }
     res.json({ questions: filtered });
+  });
+  app.get("/api/settings", (req, res) => {
+    res.json({ settings: getSettings() });
+  });
+  app.post("/api/settings", import_express.default.json(), (req, res) => {
+    try {
+      const { settings } = req.body;
+      if (!settings) return res.status(400).json({ error: "Settings required" });
+      import_fs.default.writeFileSync(CONFIG_PATH, JSON.stringify(settings, null, 2), "utf-8");
+      if (settings.cloudinaryCloudName && settings.cloudinaryApiKey && settings.cloudinaryApiSecret) {
+        import_cloudinary.v2.config({
+          cloud_name: settings.cloudinaryCloudName,
+          api_key: settings.cloudinaryApiKey,
+          api_secret: settings.cloudinaryApiSecret,
+          secure: true
+        });
+        isCloudinaryConfigured = true;
+        cloudName = settings.cloudinaryCloudName;
+        apiKey = settings.cloudinaryApiKey;
+        apiSecret = settings.cloudinaryApiSecret;
+      }
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  const uploadsDir = import_path.default.join(process.cwd(), "public", "uploads");
+  if (!import_fs.default.existsSync(uploadsDir)) {
+    import_fs.default.mkdirSync(uploadsDir, { recursive: true });
+  }
+  function getCloudinaryCloudName() {
+    let cloudName2 = process.env.CLOUDINARY_CLOUD_NAME;
+    const cloudinaryUrl = process.env.CLOUDINARY_URL;
+    if (!cloudName2 && cloudinaryUrl) {
+      try {
+        const parts = cloudinaryUrl.split("@");
+        if (parts.length > 1) {
+          cloudName2 = parts[1].split("/")[0].split("?")[0].trim();
+        }
+      } catch (err) {
+        console.error("Failed to parse CLOUDINARY_URL:", err);
+      }
+    }
+    return cloudName2 || "nbmtg6zc";
+  }
+  let isCloudinaryConfigured = false;
+  let { cloudinaryCloudName: cloudName, cloudinaryApiKey: apiKey, cloudinaryApiSecret: apiSecret, cloudinaryUploadPreset: uploadPreset } = initialSettings;
+  if (cloudName && apiKey && apiSecret) {
+    import_cloudinary.v2.config({
+      cloud_name: cloudName,
+      api_key: apiKey,
+      api_secret: apiSecret,
+      secure: true
+    });
+    isCloudinaryConfigured = true;
+    console.log(`Cloudinary SDK configured successfully. Cloud Name: ${cloudName}, API Key: ${apiKey}`);
+  } else {
+    console.warn("Cloudinary credentials not configured fully. Falling back to unsigned / local serving.");
+  }
+  function formatCSVCell(val) {
+    if (val === void 0 || val === null) return "";
+    const str = String(val);
+    if (str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\r")) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  }
+  function formatCSVRow(row) {
+    return row.map(formatCSVCell).join(",");
+  }
+  app.post("/api/delete-csv", import_express.default.json(), (req, res) => {
+    try {
+      const { filename } = req.body;
+      if (!filename) {
+        return res.status(400).json({ error: "Filename is required" });
+      }
+      const safeFilename = import_path.default.basename(filename);
+      if (safeFilename === "questions_with_images.csv") {
+        return res.status(400).json({ error: "Cannot delete default question bank" });
+      }
+      const filePath = import_path.default.join(process.cwd(), "public", safeFilename);
+      if (import_fs.default.existsSync(filePath)) {
+        import_fs.default.unlinkSync(filePath);
+        res.json({ success: true, message: `File ${safeFilename} deleted successfully` });
+      } else {
+        res.status(404).json({ error: "File not found" });
+      }
+    } catch (err) {
+      console.error("Error deleting CSV file:", err);
+      res.status(500).json({ error: "Failed to delete file" });
+    }
+  });
+  app.get("/api/csv-files", (req, res) => {
+    try {
+      const publicDir = import_path.default.join(process.cwd(), "public");
+      const files = import_fs.default.readdirSync(publicDir);
+      const csvFiles = files.filter((f) => f.endsWith(".csv"));
+      res.json({ files: csvFiles });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to list CSV files" });
+    }
+  });
+  app.post("/api/upload-csv", import_express.default.json({ limit: "50mb" }), (req, res) => {
+    try {
+      const { filename, content } = req.body;
+      if (!filename || !content) {
+        return res.status(400).json({ error: "filename and content are required" });
+      }
+      const safeFilename = import_path.default.basename(filename);
+      if (!safeFilename.endsWith(".csv")) {
+        return res.status(400).json({ error: "Only .csv files are allowed" });
+      }
+      const publicDir = import_path.default.join(process.cwd(), "public");
+      const filePath = import_path.default.join(publicDir, safeFilename);
+      import_fs.default.writeFileSync(filePath, content, "utf-8");
+      loadDataset();
+      res.json({ success: true, filename: safeFilename });
+    } catch (err) {
+      console.error("Error uploading CSV:", err);
+      res.status(500).json({ error: err.message || "Failed to save CSV file on server" });
+    }
+  });
+  app.post("/api/create-csv", import_express.default.json(), (req, res) => {
+    try {
+      let { filename } = req.body;
+      if (!filename || typeof filename !== "string") {
+        const specialties = ["cardiology", "pediatrics", "gastroenterology", "neurology", "nephrology", "pulmonology", "endocrinology", "hematology", "rheumatology", "oncology", "surgery", "anatomy", "physiology", "pathology", "pharmacology", "microbiology"];
+        const categories = ["high_yield", "clinical_vignettes", "board_review", "essentials", "case_files", "rapid_review", "diagnostic_keys"];
+        const suffixes = ["qbank", "bank", "study_guide", "2026", "simulation"];
+        const spec = specialties[Math.floor(Math.random() * specialties.length)];
+        const cat = categories[Math.floor(Math.random() * categories.length)];
+        const suf = suffixes[Math.floor(Math.random() * suffixes.length)];
+        filename = `${spec}_${cat}_${suf}.csv`;
+      }
+      let safeFilename = import_path.default.basename(filename).trim();
+      if (!safeFilename.endsWith(".csv")) {
+        safeFilename = `${safeFilename}.csv`;
+      }
+      safeFilename = safeFilename.replace(/[^a-zA-Z0-9_\.-]/g, "_");
+      const publicDir = import_path.default.join(process.cwd(), "public");
+      const filePath = import_path.default.join(publicDir, safeFilename);
+      if (import_fs.default.existsSync(filePath)) {
+        return res.status(400).json({ error: `A dataset named "${safeFilename}" already exists. Please choose another name.` });
+      }
+      const headers = "Subject,Topic,Subtopic,QuestionText,Explanation,OptionA,OptionB,OptionC,OptionD,CorrectOpt,imageUrl";
+      const sampleQuestion = 'Pathology,Cell Injury,Apoptosis,"Which of the following is the initiator caspase in the extrinsic pathway of apoptosis?","Caspase-8 is the initiator caspase in the extrinsic pathway of apoptosis, activated by FasL/TNF binding to death receptors.",Caspase-3,Caspase-9,Caspase-8,Caspase-12,C,';
+      const fileContent = `${headers}
+${sampleQuestion}
+`;
+      import_fs.default.writeFileSync(filePath, fileContent, "utf-8");
+      loadDataset();
+      res.json({ success: true, filename: safeFilename });
+    } catch (err) {
+      console.error("Error creating new CSV:", err);
+      res.status(500).json({ error: err.message || "Failed to create new CSV file on server" });
+    }
+  });
+  app.get("/api/csv-questions", (req, res) => {
+    try {
+      const { fileName } = req.query;
+      const fileToRead = fileName || "questions_with_images.csv";
+      const filePath = import_path.default.join(process.cwd(), "public", fileToRead);
+      if (!import_fs.default.existsSync(filePath)) {
+        return res.status(404).json({ error: `File not found: ${fileToRead}` });
+      }
+      const fileContent = import_fs.default.readFileSync(filePath, "utf-8");
+      const rows = parseCSV(fileContent);
+      if (rows.length === 0) {
+        return res.json({ headers: [], questions: [] });
+      }
+      const headers = rows[0];
+      const questions = [];
+      const questionColIdx = headers.findIndex((h) => {
+        const lower = h.trim().toLowerCase();
+        return lower === "questiontext" || lower === "question" || lower === "text";
+      });
+      const explanationColIdx = headers.findIndex((h) => h.trim().toLowerCase() === "explanation");
+      const optAIdx = headers.findIndex((h) => h.trim().toLowerCase() === "optiona" || h.trim().toLowerCase() === "option a");
+      const optBIdx = headers.findIndex((h) => h.trim().toLowerCase() === "optionb" || h.trim().toLowerCase() === "option b");
+      const optCIdx = headers.findIndex((h) => h.trim().toLowerCase() === "optionc" || h.trim().toLowerCase() === "option c");
+      const optDIdx = headers.findIndex((h) => h.trim().toLowerCase() === "optiond" || h.trim().toLowerCase() === "option d");
+      const correctOptIdx = headers.findIndex((h) => h.trim().toLowerCase() === "correctopt" || h.trim().toLowerCase() === "correct option");
+      const imageUrlIdx = headers.findIndex((h) => h.trim().toLowerCase() === "imageurl" || h.trim().toLowerCase() === "image");
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        if (row.length < 5) continue;
+        const text = questionColIdx !== -1 ? row[questionColIdx] : "";
+        if (!text) continue;
+        questions.push({
+          sourceFile: fileToRead,
+          rowIndex: i - 1,
+          subject: row[0] || "",
+          topic: row[1] || "",
+          subtopic: row[2] || "",
+          text,
+          explanation: explanationColIdx !== -1 ? row[explanationColIdx] : "",
+          options: [
+            optAIdx !== -1 ? row[optAIdx] : "",
+            optBIdx !== -1 ? row[optBIdx] : "",
+            optCIdx !== -1 ? row[optCIdx] : "",
+            optDIdx !== -1 ? row[optDIdx] : ""
+          ],
+          correctAnswer: getCorrectAnswerIndex(correctOptIdx !== -1 ? row[correctOptIdx] : "A"),
+          imageUrl: (imageUrlIdx !== -1 ? row[imageUrlIdx] : "") || "",
+          isImageBased: fileToRead.includes("with_images") || imageUrlIdx !== -1 && !!row[imageUrlIdx]
+        });
+      }
+      res.json({ headers, questions });
+    } catch (err) {
+      console.error("Error reading CSV file:", err);
+      res.status(500).json({ error: err.message || "Failed to load CSV questions" });
+    }
+  });
+  app.post("/api/save-question", import_express.default.json({ limit: "10mb" }), (req, res) => {
+    try {
+      const {
+        sourceFile,
+        rowIndex,
+        subject,
+        topic,
+        subtopic,
+        text,
+        explanation,
+        options,
+        correctAnswer,
+        imageUrl
+      } = req.body;
+      if (!sourceFile) {
+        return res.status(400).json({ error: "sourceFile is required" });
+      }
+      const filePath = import_path.default.join(process.cwd(), "public", sourceFile);
+      if (!import_fs.default.existsSync(filePath)) {
+        return res.status(404).json({ error: `File not found: ${sourceFile}` });
+      }
+      const fileContent = import_fs.default.readFileSync(filePath, "utf-8");
+      const rows = parseCSV(fileContent);
+      if (rows.length === 0) {
+        return res.status(500).json({ error: "CSV file is empty" });
+      }
+      const headers = rows[0];
+      const correctOptLetters = ["A", "B", "C", "D"];
+      const correctLetter = correctOptLetters[correctAnswer] || "A";
+      const questionColIdx = headers.findIndex((h) => {
+        const lower = h.trim().toLowerCase();
+        return lower === "questiontext" || lower === "question" || lower === "text";
+      });
+      const explanationColIdx = headers.findIndex((h) => h.trim().toLowerCase() === "explanation");
+      const optAIdx = headers.findIndex((h) => h.trim().toLowerCase() === "optiona" || h.trim().toLowerCase() === "option a");
+      const optBIdx = headers.findIndex((h) => h.trim().toLowerCase() === "optionb" || h.trim().toLowerCase() === "option b");
+      const optCIdx = headers.findIndex((h) => h.trim().toLowerCase() === "optionc" || h.trim().toLowerCase() === "option c");
+      const optDIdx = headers.findIndex((h) => h.trim().toLowerCase() === "optiond" || h.trim().toLowerCase() === "option d");
+      const correctOptIdx = headers.findIndex((h) => h.trim().toLowerCase() === "correctopt" || h.trim().toLowerCase() === "correct option");
+      let imageUrlIdx = headers.findIndex((h) => h.trim().toLowerCase() === "imageurl" || h.trim().toLowerCase() === "image");
+      if (imageUrlIdx === -1 && imageUrl && sourceFile.includes("with_images")) {
+        headers.push("imageUrl");
+        imageUrlIdx = headers.length - 1;
+        for (let j = 1; j < rows.length; j++) {
+          rows[j].push("");
+        }
+      }
+      const newRowData = [];
+      newRowData[0] = subject || "";
+      newRowData[1] = topic || "";
+      newRowData[2] = subtopic || "";
+      if (questionColIdx !== -1) newRowData[questionColIdx] = text || "";
+      if (explanationColIdx !== -1) newRowData[explanationColIdx] = explanation || "";
+      if (optAIdx !== -1) newRowData[optAIdx] = options[0] || "";
+      if (optBIdx !== -1) newRowData[optBIdx] = options[1] || "";
+      if (optCIdx !== -1) newRowData[optCIdx] = options[2] || "";
+      if (optDIdx !== -1) newRowData[optDIdx] = options[3] || "";
+      if (correctOptIdx !== -1) newRowData[correctOptIdx] = correctLetter;
+      if (imageUrlIdx !== -1) newRowData[imageUrlIdx] = imageUrl || "";
+      let updatedRows = [...rows];
+      if (rowIndex !== void 0 && rowIndex !== null && rowIndex >= 0) {
+        const actualRowIndex = rowIndex + 1;
+        if (actualRowIndex < updatedRows.length) {
+          updatedRows[actualRowIndex] = newRowData;
+        } else {
+          return res.status(400).json({ error: "rowIndex out of bounds" });
+        }
+      } else {
+        updatedRows.push(newRowData);
+      }
+      const csvContent = updatedRows.map(formatCSVRow).join("\n") + "\n";
+      import_fs.default.writeFileSync(filePath, csvContent, "utf-8");
+      res.json({ success: true, rowIndex: rowIndex !== void 0 && rowIndex !== null ? rowIndex : updatedRows.length - 2 });
+    } catch (err) {
+      console.error("Error saving question:", err);
+      res.status(500).json({ error: err.message || "Failed to save question to CSV" });
+    }
+  });
+  app.post("/api/delete-question", import_express.default.json(), (req, res) => {
+    try {
+      const { sourceFile, rowIndex } = req.body;
+      if (!sourceFile || rowIndex === void 0 || rowIndex === null) {
+        return res.status(400).json({ error: "sourceFile and rowIndex are required" });
+      }
+      const filePath = import_path.default.join(process.cwd(), "public", sourceFile);
+      if (!import_fs.default.existsSync(filePath)) {
+        return res.status(404).json({ error: `File not found: ${sourceFile}` });
+      }
+      const fileContent = import_fs.default.readFileSync(filePath, "utf-8");
+      const rows = parseCSV(fileContent);
+      if (rows.length === 0) {
+        return res.status(500).json({ error: "CSV file is empty" });
+      }
+      const actualRowIndex = rowIndex + 1;
+      if (actualRowIndex >= rows.length) {
+        return res.status(400).json({ error: "rowIndex out of bounds" });
+      }
+      rows.splice(actualRowIndex, 1);
+      const csvContent = rows.map(formatCSVRow).join("\n") + "\n";
+      import_fs.default.writeFileSync(filePath, csvContent, "utf-8");
+      res.json({ success: true });
+    } catch (err) {
+      console.error("Error deleting question:", err);
+      res.status(500).json({ error: err.message || "Failed to delete question" });
+    }
+  });
+  app.post("/api/upload", import_express.default.json({ limit: "50mb" }), async (req, res) => {
+    try {
+      const { image, filename } = req.body;
+      if (!image) {
+        return res.status(400).json({ error: "No image data provided" });
+      }
+      const matches = image.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+      let buffer;
+      let mimeType = "image/jpeg";
+      if (matches && matches.length === 3) {
+        mimeType = matches[1];
+        buffer = Buffer.from(matches[2], "base64");
+      } else {
+        buffer = Buffer.from(image, "base64");
+      }
+      const ext = mimeType.split("/")[1] || "jpg";
+      const cleanFilename = filename ? `${import_path.default.parse(filename).name}_${Date.now()}.${ext}` : `upload_${Date.now()}.${ext}`;
+      let uploadInput = image;
+      if (!uploadInput.startsWith("data:")) {
+        uploadInput = `data:${mimeType};base64,${image}`;
+      }
+      const publicId = filename ? `${import_path.default.parse(filename).name.replace(/[^a-zA-Z0-9_-]/g, "_")}_${Date.now()}` : `upload_${Date.now()}`;
+      if (isCloudinaryConfigured) {
+        try {
+          console.log(`Uploading to Cloudinary via SDK: cloud=${cloudName}, public_id=${publicId}`);
+          const uploadOptions = {
+            folder: "high-yield-qbank",
+            resource_type: "image",
+            public_id: publicId,
+            transformation: [
+              { fetch_format: "auto", quality: "auto" }
+            ]
+          };
+          const uploadResult = await import_cloudinary.v2.uploader.upload(uploadInput, uploadOptions);
+          let url2 = uploadResult.secure_url || uploadResult.url;
+          if (url2) {
+            if (url2.includes("res.cloudinary.com") && !url2.includes("/f_auto,q_auto/")) {
+              url2 = url2.replace("/image/upload/", "/image/upload/f_auto,q_auto/");
+            }
+            console.log(`Cloudinary SDK upload successful: ${url2}`);
+            return res.json({ url: url2 });
+          }
+        } catch (sdkError) {
+          console.error("Cloudinary SDK upload failed, trying Unsigned HTTP fallback...", sdkError);
+        }
+      }
+      if (cloudName) {
+        try {
+          console.log(`Uploading to Cloudinary via Unsigned API fallback: cloud=${cloudName}, preset=${uploadPreset}`);
+          const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              file: uploadInput,
+              upload_preset: uploadPreset,
+              public_id: publicId
+            })
+          });
+          if (response.ok) {
+            const uploadResult = await response.json();
+            let url2 = uploadResult.secure_url || uploadResult.url;
+            if (url2) {
+              if (url2.includes("res.cloudinary.com") && !url2.includes("/f_auto,q_auto/")) {
+                url2 = url2.replace("/image/upload/", "/image/upload/f_auto,q_auto/");
+              }
+              console.log(`Cloudinary Unsigned API upload successful: ${url2}`);
+              return res.json({ url: url2 });
+            }
+          } else {
+            const errText = await response.text();
+            console.error(`Cloudinary Unsigned API returned error: ${response.status} - ${errText}`);
+          }
+        } catch (httpError) {
+          console.error("Cloudinary Unsigned HTTP upload also failed:", httpError);
+        }
+      }
+      console.log("Saving uploaded image to local static folder (Cloudinary fallback).");
+      const localFilePath = import_path.default.join(uploadsDir, cleanFilename);
+      import_fs.default.writeFileSync(localFilePath, buffer);
+      const url = `/uploads/${cleanFilename}`;
+      return res.json({ url });
+    } catch (err) {
+      console.error("Upload handler error:", err);
+      res.status(500).json({ error: err.message || "Upload handler failed" });
+    }
   });
   app.post("/api/recommendations", async (req, res) => {
     const { performanceData } = req.body;
